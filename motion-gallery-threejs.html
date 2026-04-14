@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Motion Gallery — Three.js Demo</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #0a0a0a; overflow: hidden; font-family: 'Helvetica Neue', sans-serif; }
+  canvas { display: block; }
+
+  #overlay {
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    pointer-events: none; z-index: 10; transition: opacity 1.2s ease;
+  }
+  #overlay.hide { opacity: 0; }
+  #title-block { position: absolute; bottom: 100px; left: 60px; color: #fff; }
+  #title-block .sub {
+    font-size: 13px; letter-spacing: 3px; text-transform: uppercase;
+    color: rgba(255,255,255,.5); margin-bottom: 12px;
+    display: flex; align-items: center; gap: 12px;
+  }
+  #title-block .sub::before {
+    content: ''; display: block; width: 30px; height: 1px; background: rgba(255,255,255,.4);
+  }
+  #title-block h1 { font-size: clamp(32px,5vw,56px); font-weight: 300; line-height: 1.1; letter-spacing: -1px; }
+  #title-block h1 em { font-style: italic; }
+  #title-block .desc { margin-top: 16px; font-size: 14px; color: rgba(255,255,255,.4); max-width: 380px; line-height: 1.6; }
+
+  #scroll-hint {
+    position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%);
+    color: rgba(255,255,255,.3); font-size: 12px; letter-spacing: 2px;
+    text-transform: uppercase; z-index: 10;
+    animation: pulse 2s ease-in-out infinite; transition: opacity .5s;
+  }
+  #scroll-hint.hide { opacity: 0; }
+  @keyframes pulse {
+    0%,100% { opacity:.3; transform: translateX(-50%) translateY(0); }
+    50% { opacity:.55; transform: translateX(-50%) translateY(-4px); }
+  }
+
+  #close-btn {
+    position: fixed; top: 30px; right: 30px;
+    width: 44px; height: 44px; border-radius: 50%;
+    background: rgba(0,0,0,.6); border: 1px solid rgba(255,255,255,.2);
+    color: #fff; font-size: 20px; cursor: pointer;
+    display: none; align-items: center; justify-content: center;
+    z-index: 20; backdrop-filter: blur(8px); transition: all .3s;
+  }
+  #close-btn:hover { background: rgba(255,255,255,.15); }
+</style>
+</head>
+<body>
+<div id="overlay">
+  <div id="title-block">
+    <div class="sub">Selected work · 2014 — 2026</div>
+    <h1>Every frame,<br><em>every story.</em></h1>
+    <p class="desc">Scroll to accelerate. Photos burst out as they reach center, then settle back.</p>
+  </div>
+</div>
+<div id="scroll-hint">↓ Scroll to explore</div>
+<button id="close-btn">✕</button>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/gsap.min.js"></script>
+<script>
+(() => {
+  // ═══ Config ═══
+  const CARD_COUNT      = 20;
+  const CARD_W          = 1.2;
+  const CARD_H          = 0.9;
+  const BASE_SPEED      = 0.04;
+  const CURVE_AMPLITUDE = 3.8;
+  const SPREAD_X        = 22;
+
+  // Center zone (uniform for all cards)
+  const ZONE_ENTER = 0.35;
+  const ZONE_PEAK  = 0.42;
+  const ZONE_FADE  = 0.55;
+  const ZONE_EXIT  = 0.62;
+
+  // Pop lerp (uniform)
+  const POP_LERP    = 0.025;
+  const RETURN_LERP = 0.018;
+
+  // ═══ Scene ═══
+  const scene = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, 0.1, 100);
+  camera.position.set(0, 0, 12);
+
+  const renderer = new THREE.WebGLRenderer({ antialias: true, logarithmicDepthBuffer: true });
+  renderer.setSize(innerWidth, innerHeight);
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+  renderer.setClearColor(0x0a0a0a);
+  document.body.appendChild(renderer.domElement);
+
+  const grid = new THREE.GridHelper(40, 40, 0x1a1a1a, 0x141414);
+  grid.rotation.x = Math.PI / 2;
+  grid.position.z = -3;
+  scene.add(grid);
+
+  // ═══ Textures ═══
+  function createTexture(i) {
+    const c = document.createElement('canvas');
+    c.width = 512; c.height = 384;
+    const ctx = c.getContext('2d');
+    const h1 = (i * 37 + 10) % 360;
+    const h2 = (h1 + 40 + Math.random() * 60) % 360;
+    const g = ctx.createLinearGradient(0, 0, c.width, c.height);
+    g.addColorStop(0,   `hsl(${h1}, 55%, ${28+Math.random()*25}%)`);
+    g.addColorStop(.5,  `hsl(${(h1+h2)/2}, 45%, ${22+Math.random()*20}%)`);
+    g.addColorStop(1,   `hsl(${h2}, 50%, ${18+Math.random()*30}%)`);
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, c.width, c.height);
+    for (let j = 0; j < 5; j++) {
+      ctx.beginPath();
+      ctx.arc(Math.random()*c.width, Math.random()*c.height, 15+Math.random()*100, 0, Math.PI*2);
+      ctx.fillStyle = `hsla(${h1+Math.random()*80}, 40%, ${35+Math.random()*35}%, .18)`;
+      ctx.fill();
+    }
+    const tex = new THREE.CanvasTexture(c);
+    tex.minFilter = THREE.LinearFilter;
+    return tex;
+  }
+
+  // ═══ Cards ═══
+  const cards = [];
+  const raycaster = new THREE.Raycaster();
+  const mouse = new THREE.Vector2();
+  let expandedCard = null;
+  let isExpanded = false;
+
+  for (let i = 0; i < CARD_COUNT; i++) {
+    const geo = new THREE.PlaneGeometry(CARD_W, CARD_H);
+    const mat = new THREE.MeshBasicMaterial({
+      map: createTexture(i), side: THREE.DoubleSide, transparent: true,
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+    scene.add(mesh);
+
+    cards.push({
+      mesh,
+      baseT: i / CARD_COUNT,
+      currentT: 0,
+      initRotZ: (Math.random() - .5) * .06,
+      zBase: i * 0.025,
+      // Scatter (random per card, but applied uniformly by zone)
+      scatterOffX: (Math.random() - .5) * 7,
+      scatterOffY: (Math.random() - .5) * 4.5,
+      scatterOffZ: 1.0 + Math.random() * 2.5,
+      scatterRotX: (Math.random() - .5) * .25,
+      scatterRotY: (Math.random() - .5) * .25,
+      scatterRotZ: (Math.random() - .5) * .2,
+      scatterScale: 1.2 + Math.random() * 1.5,
+      // Float wobble
+      floatSpeed: .1 + Math.random() * .2,
+      floatAmpX: .015 + Math.random() * .04,
+      floatAmpY: .01 + Math.random() * .03,
+      floatPhase: Math.random() * Math.PI * 2,
+      // State
+      popAmount: 0,
+    });
+  }
+
+  // ═══ Conveyor ═══
+  function getConveyorPos(t) {
+    return {
+      x: (t - .5) * SPREAD_X,
+      y: -Math.pow(t - .3, 2) * CURVE_AMPLITUDE + 2,
+    };
+  }
+  function getConveyorScale(t) {
+    return .6 + Math.sin(t * Math.PI) * .4;
+  }
+
+  // ═══ Zone pop (uniform, same for all cards) ═══
+  function computePopAmount(t) {
+    if (t < ZONE_ENTER || t > ZONE_EXIT) return 0;
+    if (t >= ZONE_PEAK && t <= ZONE_FADE) return 1;
+    if (t < ZONE_PEAK) return smoothstep(ZONE_ENTER, ZONE_PEAK, t);
+    return 1 - smoothstep(ZONE_FADE, ZONE_EXIT, t);
+  }
+  function smoothstep(a, b, x) {
+    const t = Math.max(0, Math.min(1, (x - a) / (b - a)));
+    return t * t * (3 - 2 * t);
+  }
+
+  // ═══ Virtual infinite scroll with momentum ═══
+  // scrollVel accumulates from wheel/touch, decays with friction
+  let scrollVel = 0;     // current velocity (pixels-equivalent per frame)
+  let scrollOffset = 0;  // accumulated conveyor offset
+  let hasScrolled = false;
+
+  const FRICTION   = 0.97;  // velocity decay per frame (higher = longer coast)
+  const WHEEL_SENS = 0.001;
+  const TOUCH_SENS = 0.002;
+
+  window.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    if (isExpanded) return;
+    scrollVel += e.deltaY * WHEEL_SENS;
+    if (!hasScrolled) onFirstScroll();
+  }, { passive: false });
+
+  let touchPrevY = 0;
+  window.addEventListener('touchstart', (e) => { touchPrevY = e.touches[0].clientY; }, { passive: true });
+  window.addEventListener('touchmove', (e) => {
+    if (isExpanded) return;
+    const y = e.touches[0].clientY;
+    scrollVel += (touchPrevY - y) * TOUCH_SENS;
+    touchPrevY = y;
+    if (!hasScrolled) onFirstScroll();
+  }, { passive: true });
+
+  function onFirstScroll() {
+    hasScrolled = true;
+    document.getElementById('overlay').classList.add('hide');
+    document.getElementById('scroll-hint').classList.add('hide');
+  }
+
+  // ═══ Animate ═══
+  let time = 0;
+  function lerp(a, b, t) { return a + (b - a) * t; }
+
+  function animate() {
+    requestAnimationFrame(animate);
+    const dt = 1 / 60;
+    time += dt;
+
+    // ── Scroll momentum ──
+    scrollVel *= FRICTION;
+    // Total speed = base auto-scroll + scroll velocity
+    const totalSpeed = BASE_SPEED + scrollVel;
+    scrollOffset += dt * totalSpeed;
+
+    // ── Expanded: just wobble ──
+    if (isExpanded) {
+      cards.forEach(card => {
+        if (card !== expandedCard && card.popAmount > .1) {
+          card.mesh.position.x += Math.sin(time * card.floatSpeed + card.floatPhase) * card.floatAmpX * .003;
+          card.mesh.position.y += Math.cos(time * card.floatSpeed * .7 + card.floatPhase) * card.floatAmpY * .003;
+        }
+      });
+      renderer.render(scene, camera);
+      return;
+    }
+
+    // ── Update cards ──
+    cards.forEach(card => {
+      let t = (card.baseT + scrollOffset) % 1;
+      if (t < 0) t += 1;
+      card.currentT = t;
+
+      // Zone-based pop (same for all cards)
+      const rawPop = computePopAmount(t);
+      const lSpeed = rawPop > card.popAmount ? POP_LERP : RETURN_LERP;
+      card.popAmount += (rawPop - card.popAmount) * lSpeed;
+      if (card.popAmount < .002) card.popAmount = 0;
+
+      const cPos = getConveyorPos(t);
+      const cScale = getConveyorScale(t);
+
+      if (card.popAmount > 0) {
+        const p = card.popAmount;
+        const ep = p * p * (3 - 2 * p);
+
+        const wobX = Math.sin(time * card.floatSpeed + card.floatPhase) * card.floatAmpX * ep;
+        const wobY = Math.cos(time * card.floatSpeed * .7 + card.floatPhase) * card.floatAmpY * ep;
+        const wobRz = Math.sin(time * .1 + card.floatPhase) * .002 * ep;
+
+        card.mesh.position.x = lerp(cPos.x, cPos.x + card.scatterOffX, ep) + wobX;
+        card.mesh.position.y = lerp(cPos.y, cPos.y + card.scatterOffY, ep) + wobY;
+        card.mesh.position.z = lerp(card.zBase, card.scatterOffZ + card.zBase, ep);
+
+        card.mesh.rotation.x = lerp(0, card.scatterRotX, ep);
+        card.mesh.rotation.y = lerp(0, card.scatterRotY, ep);
+        card.mesh.rotation.z = lerp(card.initRotZ, card.scatterRotZ, ep) + wobRz;
+
+        card.mesh.scale.setScalar(lerp(cScale, card.scatterScale, ep));
+      } else {
+        card.mesh.position.set(cPos.x, cPos.y, card.zBase);
+        card.mesh.rotation.set(0, 0, card.initRotZ);
+        card.mesh.scale.setScalar(cScale);
+      }
+    });
+
+    renderer.render(scene, camera);
+  }
+  animate();
+
+  // ═══ Click expand ═══
+  function expandCard(card) {
+    if (isExpanded) return;
+    isExpanded = true;
+    expandedCard = card;
+    document.getElementById('close-btn').style.display = 'flex';
+
+    cards.forEach(c => {
+      if (c !== card) gsap.to(c.mesh.material, { opacity: .08, duration: .8 });
+    });
+    gsap.to(card.mesh.position, { x: 0, y: 0, z: 4.5, duration: 1.1, ease: 'power2.out' });
+    gsap.to(card.mesh.rotation, { x: 0, y: 0, z: 0, duration: 1.1, ease: 'power2.out' });
+    gsap.to(card.mesh.scale, { x: 5, y: 5, z: 1, duration: 1.1, ease: 'power2.out' });
+  }
+
+  function closeExpand() {
+    if (!isExpanded || !expandedCard) return;
+    document.getElementById('close-btn').style.display = 'none';
+    cards.forEach(c => gsap.to(c.mesh.material, { opacity: 1, duration: .5 }));
+
+    const card = expandedCard;
+    const cPos = getConveyorPos(card.currentT);
+    const ep = card.popAmount * card.popAmount * (3 - 2 * card.popAmount);
+    const tx = lerp(cPos.x, cPos.x + card.scatterOffX, ep);
+    const ty = lerp(cPos.y, cPos.y + card.scatterOffY, ep);
+    const tz = lerp(card.zBase, card.scatterOffZ + card.zBase, ep);
+
+    gsap.to(card.mesh.position, { x: tx, y: ty, z: tz, duration: .9, ease: 'power2.inOut' });
+    gsap.to(card.mesh.rotation, {
+      x: lerp(0, card.scatterRotX, ep),
+      y: lerp(0, card.scatterRotY, ep),
+      z: lerp(card.initRotZ, card.scatterRotZ, ep),
+      duration: .9, ease: 'power2.inOut',
+    });
+    gsap.to(card.mesh.scale, {
+      x: lerp(1, card.scatterScale, ep),
+      y: lerp(1, card.scatterScale, ep),
+      z: 1, duration: .9, ease: 'power2.inOut',
+      onComplete: () => { isExpanded = false; expandedCard = null; }
+    });
+  }
+
+  document.getElementById('close-btn').addEventListener('click', closeExpand);
+
+  renderer.domElement.addEventListener('click', (e) => {
+    if (isExpanded) return;
+    mouse.x = (e.clientX / innerWidth) * 2 - 1;
+    mouse.y = -(e.clientY / innerHeight) * 2 + 1;
+    raycaster.setFromCamera(mouse, camera);
+    const hits = raycaster.intersectObjects(cards.filter(c => c.popAmount > .3).map(c => c.mesh));
+    if (hits.length > 0) {
+      const card = cards.find(c => c.mesh === hits[0].object);
+      if (card) expandCard(card);
+    }
+  });
+
+  window.addEventListener('resize', () => {
+    camera.aspect = innerWidth / innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(innerWidth, innerHeight);
+  });
+})();
+</script>
+</body>
+</html>
