@@ -11,8 +11,8 @@ export const SPREAD_X = 22;
 // センターゾーン（ポップ演出の範囲）
 export const ZONE_ENTER = 0.35;
 export const ZONE_PEAK = 0.42;
-export const ZONE_FADE = 0.55;
-export const ZONE_EXIT = 0.62;
+export const ZONE_FADE = 0.50;
+export const ZONE_EXIT = 0.53;
 
 // ポップ補間速度
 export const POP_LERP = 0.025;

@@ -1,11 +1,11 @@
 import * as THREE from "three";
 
 const images = [
-  "/img/aniversary.webp",
-  "/img/arcraft.webp",
-  "/img/nenga-2024.webp",
-  "/img/nenga-2026.webp",
-  "/img/portfolio-2024.webp",
+  "img/aniversary.webp",
+  "img/arcraft.webp",
+  "img/nenga-2024.webp",
+  "img/nenga-2026.webp",
+  "img/portfolio-2024.webp",
 ];
 
 const loader = new THREE.TextureLoader();
